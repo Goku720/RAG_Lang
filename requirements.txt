@@ -1,0 +1,8 @@
+flask
+flask-cors
+python-dotenv
+pypdf
+sentence-transformers
+groq
+chromadb
+langgraph

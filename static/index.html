@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF RAG Chatbot</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  .bar { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+  select, input[type=text], button { padding: .5rem .7rem; font-size: 1rem; }
+  input[type=text] { flex: 1; min-width: 200px; }
+  #status { color: #666; font-size: .9rem; }
+  .msg { padding: .7rem 1rem; border-radius: 8px; margin: .6rem 0; white-space: pre-wrap; }
+  .user { background: #e8f0fe; }
+  .bot { background: #f4f4f4; }
+  .badge { display: inline-block; font-size: .8rem; padding: .1rem .5rem; border-radius: 10px; margin-top: .4rem; }
+  .ok { background: #d4edda; } .low { background: #f8d7da; }
+  details { margin-top: .4rem; font-size: .88rem; }
+  .chunk { border-left: 3px solid #bbb; padding-left: .6rem; margin: .4rem 0; }
+</style>
+</head>
+<body>
+<h1>PDF RAG Chatbot</h1>
+<div class="bar">
+  <input type="file" id="pdf" accept="application/pdf">
+  <button onclick="upload()">Upload</button>
+  <span id="status"></span>
+</div>
+<div class="bar">
+  <label>Document: <select id="doc"></select></label>
+</div>
+<div id="chat"></div>
+<div class="bar">
+  <input type="text" id="q" placeholder="Ask a question about the PDF..." onkeydown="if(event.key==='Enter')ask()">
+  <button onclick="ask()">Ask</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function loadDocs(select) {
+  const r = await fetch('/documents'); const d = await r.json();
+  $('doc').innerHTML = d.documents.map(n => `<option>${esc(n)}</option>`).join('');
+  if (select) $('doc').value = select;
+}
+
+async function upload() {
+  const f = $('pdf').files[0];
+  if (!f) return;
+  $('status').textContent = 'Ingesting...';
+  const fd = new FormData(); fd.append('pdf', f);
+  const r = await fetch('/upload', { method: 'POST', body: fd });
+  const d = await r.json();
+  $('status').textContent = r.ok ? `Done: ${d.chunks} chunks stored` : `Error: ${d.error}`;
+  if (r.ok) loadDocs(d.source);
+}
+
+function add(cls, html) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + cls; el.innerHTML = html;
+  $('chat').appendChild(el); return el;
+}
+
+async function ask() {
+  const query = $('q').value.trim(), source = $('doc').value;
+  if (!query || !source) return;
+  $('q').value = '';
+  add('user', esc(query));
+  const bot = add('bot', 'Thinking...');
+  const r = await fetch('/ask', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify({ query, source }) });
+  const d = await r.json();
+  if (!r.ok) { bot.textContent = 'Error: ' + d.error; return; }
+  const chunks = d.chunks.map((c, i) =>
+    `<div class="chunk"><b>[${i + 1}] page ${c.page} · score ${c.score}</b><br>${esc(c.text)}</div>`).join('');
+  bot.innerHTML = `${esc(d.answer)}<br>
+    <span class="badge ${d.grounded ? 'ok' : 'low'}">confidence ${d.confidence} · ${d.grounded ? 'grounded' : 'not found'}</span>
+    <details><summary>Retrieved context (${d.chunks.length})</summary>${chunks}</details>`;
+}
+
+loadDocs();
+</script>
+</body>
+</html>
